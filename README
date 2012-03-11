@@ -1,0 +1,59 @@
+***************
+**** INTRO ****
+***************
+
+I wrote this driver purely to see if I could.
+All the other windows7 drivers I could find where just aweful.
+They did not offer any of the power I WANT in a driver tool
+for my relatively old but still highly functional
+ATI Wonder Plus RF Remote Control.
+
+Once the input format was decoded and the quirks were discovered,
+the tool began to run beautifully. I highly recommend to others
+that are interested in writing their own drivers for old hardware
+research the flow control of the unit as much as they can before
+they attempt to do anything with it.
+
+I knew that this project would be relatively simple given the
+hardware can be thought of as a read only device with no need
+to send ACKs to confirm an event is handled. It was nice to see
+that the hardware even had two differentiator bits that toggle
+whenever a key is pressed multiple times versus holding a key
+down and the auto-repeator kicks in.
+
+There is definitely room for improvement and abstraction to
+support running shell commands as a result of a button press
+and making an external config file so a user does not need to
+change python source code and callbacks. Right now the tool only
+supports mapping one remote device key to another, which is all
+I need for my htc PC when using hulu/netflix/WMP/VLC/SMP.
+
+I'll probably write a short paper on my experience doing this
+because it was highly successful and has almost no learning
+curve for those of us that know python.
+
+
+***************
+**** USAGE ****
+***************
+
+
+To use this driver, you must install libusb on your windows
+system and create the generic driver for your hardware. You will
+notice in the source code that all it takes to enumerate a device
+is the hardware vendor ID and product ID which can easily be found
+in device manager.
+
+I have only tested this driver hook on windows7 64 bit. Some
+tweaking may be in order for other variants...
+
+
+***************
+**** OUTRO ****
+***************
+
+
+All I did to construct this driver was observe the bytes comming
+back from the usb stack when issuing a read command and derive
+the protocol. Simple enough to work out when the input stream is
+unencrpyted and stateless.
