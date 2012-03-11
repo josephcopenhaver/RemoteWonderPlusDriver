@@ -36,14 +36,27 @@ class FileLock(object):
 		start_time = time.time()
 		while True:
 			try:
+				if os.path.exists(self.lockfile):
+					if not os.path.isfile(self.lockfile):
+						# impossible to create a locking file,
+						# something else is in the way
+						raise FileLockException(": File path exists and is not a file")
+					try:
+						# a truly locked file cannot be deleted!
+						os.remove(self.lockfile)
+					except:
+						raise FileLockException(": Another process is using the file")
 				self.fd = os.open(self.lockfile, os.O_CREAT|os.O_EXCL|os.O_RDWR)
 				break;
+			except FileLockException as err:
+				errMsg = str(err)
 			except OSError as e:
 				if e.errno != errno.EEXIST:
-					raise 
-				if (time.time() - start_time) >= self.timeout:
-					raise FileLockException("Timeout occured.")
-				time.sleep(self.delay)
+					raise
+				errMsg = ""
+			if (time.time() - start_time) >= self.timeout:
+				raise FileLockException("Timeout occured%s."%errMsg)
+			time.sleep(self.delay)
 		self.is_locked = True
 	#end def acquire
 
