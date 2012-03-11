@@ -1,1 +1,0 @@
-start "Remote Wonder Plus Driver" pythonw RemoteWonderPlusDriver.py %*
