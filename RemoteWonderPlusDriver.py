@@ -1,4 +1,15 @@
-import usb.core, win32api, win32con, time, sys, traceback
+import usb.core, win32api, win32con, time, sys, traceback, filelock, tempfile, os
+
+class TempFileLock(filelock.FileLock):
+
+	""" Enhancement to FileLock class to only write in System
+	    Temporary directory.
+	"""
+	
+	def __init__(self, file_name, *args, **kwargs):
+		filelock.FileLock.__init__(self, file_name, *args, **kwargs)
+		self.lockfile = os.path.join(tempfile.gettempdir(), "%s.lock" % file_name)
+#end class
 
 class MouseEvent():
 
@@ -217,65 +228,66 @@ class RemoteWonderPlusDriver:
 	#end def fireEvent
 
 	def run(self):
-		ignoreError = False
-		ingoreTraceback = False
-		while 1:
-			#print "Run main driver service loop"
-			try:
-				dev = usb.core.find(idVendor=0x0BC7, idProduct=0x0004)
-
-				if dev is None:
-					ingoreTraceback = True
-					raise ValueError('%s not connected!'%(self.__class__.deviceName))
-
-				# set the active configuration. With no arguments, the first
-				# configuration will be the active one
-				dev.set_configuration()
-				cfg = dev.get_active_configuration()
-
-				interface_number = cfg[(0,0)].bInterfaceNumber
-				alternate_setting = usb.control.get_interface(dev, interface_number)
-				interfaceDescriptor = usb.util.find_descriptor(
-					cfg, bInterfaceNumber = interface_number,
-					bAlternateSetting = alternate_setting
-				)
-
-				inputChannel = usb.util.find_descriptor(
-					interfaceDescriptor,
-					# match the first IN endpoint
-					custom_match = \
-					lambda e: \
-						usb.util.endpoint_direction(e.bEndpointAddress) == \
-						usb.util.ENDPOINT_IN
-				)
-
+		with TempFileLock('RemoteWonderPlusDriver') as singleInstanceLock:
+			ignoreError = False
+			ingoreTraceback = False
+			while 1:
+				#print "Run main driver service loop"
 				try:
-					self.handleInput(inputChannel)
+					dev = usb.core.find(idVendor=0x0BC7, idProduct=0x0004)
+
+					if dev is None:
+						ingoreTraceback = True
+						raise ValueError('%s not connected!'%(self.__class__.deviceName))
+
+					# set the active configuration. With no arguments, the first
+					# configuration will be the active one
+					dev.set_configuration()
+					cfg = dev.get_active_configuration()
+
+					interface_number = cfg[(0,0)].bInterfaceNumber
+					alternate_setting = usb.control.get_interface(dev, interface_number)
+					interfaceDescriptor = usb.util.find_descriptor(
+						cfg, bInterfaceNumber = interface_number,
+						bAlternateSetting = alternate_setting
+					)
+
+					inputChannel = usb.util.find_descriptor(
+						interfaceDescriptor,
+						# match the first IN endpoint
+						custom_match = \
+						lambda e: \
+							usb.util.endpoint_direction(e.bEndpointAddress) == \
+							usb.util.ENDPOINT_IN
+					)
+
+					try:
+						self.handleInput(inputChannel)
+					except usb.core.USBError:
+						ignoreError = True
+						raise
+				except KeyboardInterrupt:
+					raise
 				except usb.core.USBError:
-					ignoreError = True
-					raise
-			except KeyboardInterrupt:
-				raise
-			except usb.core.USBError:
-				if not ignoreError:
-					raise
-				ignoreError = False
-				print "%s disconnected!"%(self.__class__.deviceName)
-				err_info = sys.exc_info()
-				print err_info[1]
-				#traceback.print_tb(err_info[2])
-				time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
-			except ValueError:
-				print sys.exc_info()[1]
-				time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
-			except:
-				err_info = sys.exc_info()
-				print err_info[0:2]
-				if ingoreTraceback:
-					ingoreTraceback = False
-				else:
-					traceback.print_tb(err_info[2])
-				time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
+					if not ignoreError:
+						raise
+					ignoreError = False
+					print "%s disconnected!"%(self.__class__.deviceName)
+					err_info = sys.exc_info()
+					print err_info[1]
+					#traceback.print_tb(err_info[2])
+					time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
+				except ValueError:
+					print sys.exc_info()[1]
+					time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
+				except:
+					err_info = sys.exc_info()
+					print err_info[0:2]
+					if ingoreTraceback:
+						ingoreTraceback = False
+					else:
+						traceback.print_tb(err_info[2])
+					time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
 	#end def run
 
 	def handleInput(self, inputChannel):
