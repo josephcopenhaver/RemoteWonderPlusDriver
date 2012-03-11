@@ -1,5 +1,4 @@
 import usb.core, win32api, win32con, time, sys, traceback
-#E:\Programs\Python27\Lib\site-packages\win32\lib\win32con.py
 
 class MouseEvent():
 
@@ -36,6 +35,7 @@ class RemoteWonderPlusDriver:
 	stdSeconds = 0.05
 	mousePixelStep = 5
 	repeatingMousePixelStep = 20
+	usb3_0ProtocolErrorBackOffSeconds = 1
 
 	# AUTO_CONFIG
 
@@ -120,7 +120,6 @@ class RemoteWonderPlusDriver:
 	def __init__(self, actionMap={}, stdSeconds=None, mousePixelStep=None, repeatingMousePixelStep=None):
 		self.actionMap = actionMap
 		self.lastCode = 0
-		self.lastReadFailTime = 0
 		self.lastReadTimeSeconds = 0
 		self.lastToggleState = False
 		self.stdSeconds = (stdSeconds is None and (self.__class__.stdSeconds,) or (stdSeconds,))[0]
@@ -262,6 +261,9 @@ class RemoteWonderPlusDriver:
 					raise
 				ignoreError = False
 				print "%s disconnected!"%(self.__class__.deviceName)
+				err_info = sys.exc_info()
+				print err_info[1]
+				#traceback.print_tb(err_info[2])
 				time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
 			except ValueError:
 				print sys.exc_info()[1]
@@ -279,6 +281,8 @@ class RemoteWonderPlusDriver:
 	def handleInput(self, inputChannel):
 		print "%s connected!"%(self.__class__.deviceName)
 		self.repeatModeEnabled = False
+		usbProtocolError3_0LastIteration = False
+		lastUsbProtocolError3_0Seconds = 0
 		while 1:
 			#print "Handler main loop"
 			try:
@@ -290,12 +294,23 @@ class RemoteWonderPlusDriver:
 						time.sleep(timeToWaitSeconds)
 				bytesRead = inputChannel.read(self.__class__.numBytesToRead, self.__class__.readTimeoutMilliseconds)
 				self.lastReadTimeSeconds = time.time()
+				usbProtocolError3_0LastIteration = False
 			except usb.core.USBError:
-				readFailTime = time.time()
-				if readFailTime - self.lastReadFailTime < self.__class__.readTimeoutSeconds:
-					self.lastReadFailTime = readFailTime
+				err_msg = str(sys.exc_info()[1]).rstrip()
+				if err_msg.endswith('timeout error'):
+					pass
+				elif err_msg.endswith(': The device is not connected.'):
 					raise
-				self.lastReadFailTime = readFailTime
+				else:
+					# most likely a usb3.0 protocol error... issue only present on usb3.0 ports
+					backOffNextReadAttempt = usbProtocolError3_0LastIteration
+					usbProtocolError3_0LastIteration = True
+					lastUsbProtocolError3_0Seconds = time.time()
+					if backOffNextReadAttempt:
+						# if two protocol errors in a row, then back off
+						time.sleep(self.__class__.usb3_0ProtocolErrorBackOffSeconds)
+					continue
+				usbProtocolError3_0LastIteration = False
 				continue
 			length = len(bytesRead)
 			if (length != 4):
