@@ -40,16 +40,16 @@ class FileLock(object):
 					if not os.path.isfile(self.lockfile):
 						# impossible to create a locking file,
 						# something else is in the way
-						raise FileLockException(": File path exists and is not a file")
+						raise FileLockException("File path exists and is not a file")
 					try:
 						# a truly locked file cannot be deleted!
 						os.remove(self.lockfile)
 					except:
-						raise FileLockException(": Another process is using the file")
+						raise FileLockException("Another process is using the file")
 				self.fd = os.open(self.lockfile, os.O_CREAT|os.O_EXCL|os.O_RDWR)
 				break;
 			except FileLockException as err:
-				errMsg = str(err)
+				errMsg = ': ' + str(err)
 			except OSError as e:
 				if e.errno != errno.EEXIST:
 					raise
