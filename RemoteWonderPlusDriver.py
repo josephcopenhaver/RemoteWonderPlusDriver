@@ -1,4 +1,5 @@
 import usb.core, win32api, win32con, time, sys, traceback, filelock, tempfile, os
+from SendKeys import SendKeys
 
 class TempFileLock(filelock.FileLock):
 
@@ -146,7 +147,7 @@ class RemoteWonderPlusDriver:
 			return self.mousePixelStep
 	#end def mousePixelStep
 
-	def fireEvent(self, eventID, state=None, modifiers=None, stdSeconds=None):
+	def fireEvent(self, eventID, state=None, stdSeconds=None):
 		originalEventID = eventID
 		sendDownState = (state in self.__class__.keyDownStatesDict)
 		sendUpState = (state in self.__class__.keyUpStatesDict)
@@ -401,11 +402,7 @@ if __name__ == '__main__':
 		lstack[idx] = None
 		return ref
 	actions = {
-		'C':                lambda:begin(# ALT_TAB... supposedly... but not working
-		                        fireEvent(KeyEvent(56), 'd'),# ALT_DOWN
-								fireEvent('tab'),
-		                        fireEvent(KeyEvent(56), 'u')# ALT_UP
-		                    ),
+		'C':               lambda:SendKeys("%{TAB}"),
 		'YES':             'mouse_left',
 		'NO':              'mouse_right',
 		'D':               'escape',
@@ -435,7 +432,7 @@ if __name__ == '__main__':
 		'SEVEN':           KeyEvent(55),
 		'EIGHT':           KeyEvent(56),
 		'NINE':            KeyEvent(57),
-		'POWER':           'CLOSE'
+		'POWER':           lambda:SendKeys("%{F4}")
 	}
 	for action in passThroughActions:
 		actions[action] = action
