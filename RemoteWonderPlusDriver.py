@@ -1,4 +1,4 @@
-import usb.core, win32api, win32con, time, sys, traceback, filelock, tempfile, os
+import usb.core, win32api, win32con, time, sys, traceback, filelock, tempfile, os, math
 from SendKeys import SendKeys
 
 class TempFileLock(filelock.FileLock):
@@ -45,9 +45,8 @@ class RemoteWonderPlusDriver:
 	nonRepeatingInterReadDelaySeconds = 0.20
 	devicePresentCheckIntervalSeconds = 3
 	stdSeconds = 0.05
-	mousePixelStep = 5
-	repeatingMousePixelStep = 20
 	usb3_0ProtocolErrorBackOffSeconds = 1
+	resetMouseRepeatingIdleTimeoutSeconds = 0.25
 
 	# AUTO_CONFIG
 
@@ -125,28 +124,36 @@ class RemoteWonderPlusDriver:
 		'du':True,
 		'down_up':True
 	}
+	
+	mouseMovingButtons = {
+		'TILT_DOWN',
+		'TILT_DOWN_LEFT',
+		'TILT_DOWN_RIGHT',
+		'TILT_LEFT',
+		'TILT_RIGHT',
+		'TILT_UP',
+		'TILT_UP_LEFT',
+		'TILT_UP_RIGHT'
+	}
 
 	readTimeoutSeconds = readTimeoutMilliseconds / 1000
 	codeButtonMap = dict([[v,k] for k,v in buttonCodeMap.items()])
 	
-	def __init__(self, actionMap={}, stdSeconds=None, mousePixelStep=None, repeatingMousePixelStep=None):
+	def __init__(self, actionMap={}, stdSeconds=None):
 		self.actionMap = actionMap
 		self.lastCode = 0
+		self.lastButtonName = None
 		self.lastReadTimeSeconds = 0
 		self.lastToggleState = False
 		self.stdSeconds = (stdSeconds is None and (self.__class__.stdSeconds,) or (stdSeconds,))[0]
-		self.mousePixelStep = (mousePixelStep is None and (self.__class__.mousePixelStep,) or (mousePixelStep,))[0]
-		self.repeatingMousePixelStep = (repeatingMousePixelStep is None and (self.__class__.repeatingMousePixelStep,) or (repeatingMousePixelStep,))[0]
 		self.repeatModeEnabled = False
+		self.repeatingStartedAtSeconds = 0
+		self.resetMouseRepeatingIdleTimeoutSeconds = self.__class__.resetMouseRepeatingIdleTimeoutSeconds
+		self.mouseMovingButtons = {}
+		for key in self.__class__.mouseMovingButtons:
+			self.mouseMovingButtons[key] = self.__class__.buttonCodeMap[key]
 	#end def __init__
 	
-	def getMousePixelStep(self):
-		if self.repeatModeEnabled:
-			return self.repeatingMousePixelStep
-		else:
-			return self.mousePixelStep
-	#end def mousePixelStep
-
 	def fireEvent(self, eventID, state=None, stdSeconds=None):
 		originalEventID = eventID
 		sendDownState = (state in self.__class__.keyDownStatesDict)
@@ -200,7 +207,6 @@ class RemoteWonderPlusDriver:
 			unknownState = None
 		if unknownState is not None:
 			raise ValueError("Cannot fire %s event \"%s\", state \"%s\""%((mouseButton and ('MOUSE',) or ('KEY',))[0], originalEventID, unknownState))
-		doDelay = (sendDownState and sendUpState)
 		if sendDownState:
 			if mouseButton:
 				x,y = win32api.GetCursorPos()
@@ -209,15 +215,15 @@ class RemoteWonderPlusDriver:
 			else:
 				#print "Pressing %s button"%(eventID)
 				win32api.keybd_event(eventEnums[0], 0, 0, 0)
-		if doDelay:
-			if stdSeconds is None:
-				try:
-					stdSeconds = self.stdSeconds
-				except:
-					pass
-			if stdSeconds is not None:
-				time.sleep(stdSeconds)
 		if sendUpState:
+			if sendDownState:
+				if stdSeconds is None:
+					try:
+						stdSeconds = self.stdSeconds
+					except:
+						pass
+				if stdSeconds is not None and stdSeconds != 0:
+					time.sleep(stdSeconds)
 			if mouseButton:
 				#print "Releasing mouse_%s button"%(eventID)
 				if not sendDownState:
@@ -296,6 +302,7 @@ class RemoteWonderPlusDriver:
 		self.repeatModeEnabled = False
 		usbProtocolError3_0LastIteration = False
 		lastUsbProtocolError3_0Seconds = 0
+		lastReadTimeSeconds = 0
 		while 1:
 			#print "Handler main loop"
 			try:
@@ -306,6 +313,7 @@ class RemoteWonderPlusDriver:
 					if timeToWaitSeconds > 0:
 						time.sleep(timeToWaitSeconds)
 				bytesRead = inputChannel.read(self.__class__.numBytesToRead, self.__class__.readTimeoutMilliseconds)
+				lastReadTimeSeconds = self.lastReadTimeSeconds
 				self.lastReadTimeSeconds = time.time()
 				usbProtocolError3_0LastIteration = False
 			except usb.core.USBError:
@@ -343,10 +351,16 @@ class RemoteWonderPlusDriver:
 			toggleState = ((code&self.__class__.toggleMask) == self.__class__.toggleMask)
 			code = code&self.__class__.codeMask
 			previousRepeatModeEnabled = self.repeatModeEnabled
-			self.repeatModeEnabled = (code == self.lastCode and toggleState == self.lastToggleState)
-			if (self.repeatModeEnabled and not previousRepeatModeEnabled):
-				continue;
 			buttonName = self.__class__.codeButtonMap[code]
+			if buttonName in self.mouseMovingButtons:
+				self.repeatModeEnabled = True
+				if (not previousRepeatModeEnabled or (self.lastReadTimeSeconds - lastReadTimeSeconds > self.resetMouseRepeatingIdleTimeoutSeconds)):
+					self.repeatingStartedAtSeconds = self.lastReadTimeSeconds
+			else:
+				self.repeatModeEnabled = (code == self.lastCode and toggleState == self.lastToggleState)
+				if (self.repeatModeEnabled and not previousRepeatModeEnabled):
+					self.repeatingStartedAtSeconds = time.time()
+					continue
 			#print "Button: %s"%(buttonName)
 			#
 			# Process callbacks
@@ -371,6 +385,7 @@ class RemoteWonderPlusDriver:
 			#
 			self.lastCode = code
 			self.lastToggleState = toggleState
+			self.lastButtonName = buttonName
 	#end def handleInput
 #end class RemoteWonderPlusDriver
 
@@ -380,7 +395,6 @@ if __name__ == '__main__':
 	fireEvent = lambda *args, **kwargs:driverInstance.fireEvent(*args, **kwargs)
 	def moveMouse(dx, dy):
 		win32api.mouse_event(win32con.MOUSEEVENTF_MOVE,dx,dy,0,0)
-	#end def moveMouse
 	passThroughActions = [
 		'UP',
 		'DOWN',
@@ -401,19 +415,34 @@ if __name__ == '__main__':
 		ref = lstack[idx]
 		lstack[idx] = None
 		return ref
+	# config: exponential increasing of mouse speed
+	dtBeforeMax = 2
+	minPixelStep = 5
+	maxPixelStep = 20
+	# auto-config: factor defition
+	pixelFactor = ((maxPixelStep-minPixelStep)/(dtBeforeMax * dtBeforeMax))
+	def getMousePixelStep(driverInstance):
+		now = time.time()
+		if not driverInstance.lastButtonName in driverInstance.mouseMovingButtons:
+			return minPixelStep
+		# if continuing Mouse Navigation
+		dt = now - driverInstance.repeatingStartedAtSeconds
+		if dt > dtBeforeMax:
+			return maxPixelStep
+		return int(math.floor((dt*dt*pixelFactor) + minPixelStep))
 	actions = {
 		'C':               lambda:SendKeys("%{TAB}"),
 		'YES':             'mouse_left',
 		'NO':              'mouse_right',
 		'D':               'escape',
-		'TILT_UP':         lambda:moveMouse(0, -driverInstance.getMousePixelStep()),
-		'TILT_DOWN':       lambda:moveMouse(0, driverInstance.getMousePixelStep()),
-		'TILT_LEFT':       lambda:moveMouse(-driverInstance.getMousePixelStep(), 0),
-		'TILT_RIGHT':      lambda:moveMouse(driverInstance.getMousePixelStep(), 0),
-		'TILT_UP_LEFT':    lambda:begin(lset(driverInstance.getMousePixelStep()),moveMouse(-lget(), -lpop())),
-		'TILT_UP_RIGHT':   lambda:begin(lset(driverInstance.getMousePixelStep()),moveMouse(lget(), -lpop())),
-		'TILT_DOWN_RIGHT': lambda:begin(lset(driverInstance.getMousePixelStep()),moveMouse(lget(), lpop())),
-		'TILT_DOWN_LEFT':  lambda:begin(lset(driverInstance.getMousePixelStep()),moveMouse(-lget(), lpop())),
+		'TILT_UP':         lambda:moveMouse(0, -getMousePixelStep(driverInstance)),
+		'TILT_DOWN':       lambda:moveMouse(0, getMousePixelStep(driverInstance)),
+		'TILT_LEFT':       lambda:moveMouse(-getMousePixelStep(driverInstance), 0),
+		'TILT_RIGHT':      lambda:moveMouse(getMousePixelStep(driverInstance), 0),
+		'TILT_UP_LEFT':    lambda:begin(lset(getMousePixelStep(driverInstance)),moveMouse(-lget(), -lpop())),
+		'TILT_UP_RIGHT':   lambda:begin(lset(getMousePixelStep(driverInstance)),moveMouse(lget(), -lpop())),
+		'TILT_DOWN_RIGHT': lambda:begin(lset(getMousePixelStep(driverInstance)),moveMouse(lget(), lpop())),
+		'TILT_DOWN_LEFT':  lambda:begin(lset(getMousePixelStep(driverInstance)),moveMouse(-lget(), lpop())),
 		'PLAY':            'MEDIA_PLAY_PAUSE',
 		'PAUSE':           'SPACE',
 		'STOP':            'MEDIA_PLAY_PAUSE',
