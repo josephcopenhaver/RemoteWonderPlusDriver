@@ -38,7 +38,9 @@ class KeyEvent():
 class RemoteWonderPlusDriver:
 
 	deviceName = 'ATI Wonder Plus RF Remote Control'
-	readTimeoutMilliseconds = 3000
+	# adjust this value to something > 0 to be able to
+	# send keyboard interrupts to stop the program
+	readTimeoutMilliseconds = 0
 	numBytesToRead = 4
 	toggleMask = 0x0080
 	codeMask = 0x8080^0xFFFF
@@ -136,7 +138,6 @@ class RemoteWonderPlusDriver:
 		'TILT_UP_RIGHT'
 	}
 
-	readTimeoutSeconds = readTimeoutMilliseconds / 1000
 	codeButtonMap = dict([[v,k] for k,v in buttonCodeMap.items()])
 	
 	def __init__(self, actionMap={}, stdSeconds=None):
@@ -238,6 +239,57 @@ class RemoteWonderPlusDriver:
 		with TempFileLock('RemoteWonderPlusDriver') as singleInstanceLock:
 			ignoreError = False
 			ingoreTraceback = False
+			#jit elements
+			dev = None
+			cfg = None
+			interface_number = None
+			alternate_setting = None
+			interfaceDescriptor = None
+			inputChannel = None
+			def reset():
+				try:
+					del inputChannel
+				except:
+					pass
+				inputChannel = None
+				try:
+					del interfaceDescriptor
+				except:
+					pass
+				interfaceDescriptor = None
+				try:
+					del alternate_setting
+				except:
+					pass
+				alternate_setting = None
+				try:
+					del interface_number
+				except:
+					pass
+				interface_number = None
+				try:
+					del cfg
+				except:
+					pass
+				cfg = None
+				try:
+					del dev
+				except:
+					pass
+				dev = None
+				try:
+					reload(win32con)
+				except:
+					pass
+				try:
+					reload(win32api)
+				except:
+					pass
+				try:
+					reload(usb.core)
+				except:
+					pass
+				time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
 			while 1:
 				#print "Run main driver service loop"
 				try:
@@ -283,10 +335,10 @@ class RemoteWonderPlusDriver:
 					err_info = sys.exc_info()
 					print err_info[1]
 					#traceback.print_tb(err_info[2])
-					time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
+					reset()
 				except ValueError:
 					print sys.exc_info()[1]
-					time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
+					reset()
 				except:
 					err_info = sys.exc_info()
 					print err_info[0:2]
@@ -294,7 +346,7 @@ class RemoteWonderPlusDriver:
 						ingoreTraceback = False
 					else:
 						traceback.print_tb(err_info[2])
-					time.sleep(self.__class__.devicePresentCheckIntervalSeconds)
+					reset()
 	#end def run
 
 	def handleInput(self, inputChannel):
